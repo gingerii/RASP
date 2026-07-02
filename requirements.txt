@@ -9,8 +9,12 @@ matplotlib==3.8.4
 scipy==1.13.1
 scikit-learn==1.5.0
 python-igraph==0.11.5
+leidenalg
 glasbey
 tqdm
+
+# Optional: clustering(method="louvain") additionally needs the `louvain` package
+# (pip install louvain). method="leiden"/"KMeans"/"walktrap" work with the above.
 
 # Optional: only needed for clustering(method="mclust").
 # Also requires R + install.packages("mclust"). Install via: pip install ".[mclust]"

@@ -33,6 +33,7 @@ dependencies = [
     "scipy",
     "scikit-learn",
     "python-igraph",
+    "leidenalg",
     "glasbey",
     "tqdm",
 ]
