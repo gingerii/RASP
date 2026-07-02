@@ -19,25 +19,34 @@ To achieve these goals, RASP uses a randomized two-stage principal component ana
 
 ## Requirements
 
-To run RASP, you need the following Python packages:
+Dependencies are declared in `pyproject.toml` and installed automatically. The
+manuscript results were produced with the following pinned versions (also in
+`requirements.txt`):
 ```
 - numpy==1.26.4
 - pandas==2.2.2
 - scanpy==1.10.1
-- squidpy=1.2.2
+- squidpy==1.2.2
 - matplotlib==3.8.4
 - scipy==1.13.1
-- sklearn==1.5.0
-- rpy2=3.5.16
-- igraph==0.11.5
+- scikit-learn==1.5.0
+- python-igraph==0.11.5
 ```
+The `mclust` clustering option additionally requires `rpy2==3.5.16` and an R
+installation with the `mclust` package; all other clustering methods
+(`louvain`, `leiden`, `KMeans`, `walktrap`) are pure Python.
 
 ## Installation
-We are working on getting RASP up on anaconda. In the meantime, to install RASP from Github please navigate to the location where you would like install the package and clone the repo: 
+Navigate to where you would like to install the package, clone the repo, and
+install with pip:
 ```bash
-git clone https://github.com/Goods-Lab//RASP.git
+git clone https://github.com/gingerii/RASP.git
 cd RASP
-pip install . 
+pip install .
+```
+To enable the optional R-backed `mclust` clustering:
+```bash
+pip install ".[mclust]"   # then, in R: install.packages("mclust")
 ```
 ## Usage
 See tutorials folder for example usage

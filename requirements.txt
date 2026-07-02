@@ -1,10 +1,17 @@
-numpy
-pandas
-scanpy
-squidpy
-matplotlib
-scipy
-sklearn
-rpy2
-mclustpy
-igraph
+# Pinned, known-good environment (matches the RASP manuscript).
+# For a normal install just use `pip install .` (deps are declared in pyproject.toml).
+# This file reproduces the exact tested versions if you need them.
+numpy==1.26.4
+pandas==2.2.2
+scanpy==1.10.1
+squidpy==1.2.2
+matplotlib==3.8.4
+scipy==1.13.1
+scikit-learn==1.5.0
+python-igraph==0.11.5
+glasbey
+tqdm
+
+# Optional: only needed for clustering(method="mclust").
+# Also requires R + install.packages("mclust"). Install via: pip install ".[mclust]"
+rpy2==3.5.16

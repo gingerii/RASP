@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rasp"
+version = "0.1.1"
+description = "Randomized Spatial PCA (RASP): a computationally efficient method for dimensionality reduction of high-resolution spatial transcriptomics data"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Ian K Gingerich", email = "gingerichik@gmail.com" }]
+keywords = [
+    "spatial transcriptomics",
+    "dimensionality reduction",
+    "PCA",
+    "single-cell",
+    "bioinformatics",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "numpy",
+    "pandas",
+    "scanpy",
+    "squidpy",
+    "matplotlib",
+    "scipy",
+    "scikit-learn",
+    "python-igraph",
+    "glasbey",
+    "tqdm",
+]
+
+# Optional: R-backed Gaussian-mixture clustering (method="mclust").
+# Also requires an R installation with the 'mclust' package.
+[project.optional-dependencies]
+mclust = ["rpy2==3.5.16"]
+
+[project.urls]
+Homepage = "https://github.com/gingerii/RASP"
+Repository = "https://github.com/gingerii/RASP"
+"Bug Tracker" = "https://github.com/gingerii/RASP/issues"
+Preprint = "https://www.biorxiv.org/content/10.1101/2024.12.20.629785v1"
+
+[tool.setuptools.packages.find]
+include = ["rasp*"]
