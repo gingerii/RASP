@@ -319,7 +319,10 @@ class RASP:
         - n_clusters: int, optional - The number of clusters. Default is 7.
         - n_neighbors: int, optional - The number of neighbors considered during refinement. Default is 15.
         - key: string, optional - The key of the learned representation in adata.obsm. Default is 'X_pca_smoothed'.
-        - method: string, optional - The tool for clustering. Supported tools: 'mclust', 'leiden', 'louvain'.
+        - method: string, optional - The tool for clustering. Supported tools:
+          'mclust' (R, Gaussian mixture EEE), 'gmm' (pure-Python equivalent of
+          mclust EEE via a tied-covariance GaussianMixture, no R needed),
+          'leiden', 'louvain', 'walktrap', 'KMeans'.
 
         Returns:
         - adata: Updated AnnData object with clustering results.
@@ -335,8 +338,9 @@ class RASP:
                     "method='mclust' requires rpy2 and an R installation with the "
                     "'mclust' package. Install with `pip install \"rasp[mclust]\"` "
                     "(pins rpy2==3.5.16) and, in R, run install.packages('mclust'). "
-                    "Otherwise choose method='louvain', 'leiden', 'KMeans', or "
-                    "'walktrap', which have no R dependency."
+                    "For an R-free equivalent use method='gmm' (tied-covariance "
+                    "GaussianMixture, matches mclust 'EEE'); method='louvain', "
+                    "'leiden', 'KMeans', and 'walktrap' also have no R dependency."
                 ) from e
             robjects.r.library("mclust")
             rpy2.robjects.numpy2ri.activate()
@@ -372,9 +376,19 @@ class RASP:
                 cluster_time = end_time - start_time
                 adata.obs[f'RASP_{method}_clusters'] = pd.Categorical(clusters.membership)
 
+        elif method == "gmm":
+            # Pure-Python equivalent of R mclust's 'EEE' model: a Gaussian
+            # mixture where all clusters share one full covariance matrix
+            # (mclust EEE == sklearn covariance_type='tied'). No R dependency.
+            from sklearn.mixture import GaussianMixture
+            gmm = GaussianMixture(n_components=n_clusters, covariance_type='tied',
+                                  random_state=2020, max_iter=200)
+            adata.obs[f'RASP_{method}_clusters'] = pd.Categorical(
+                gmm.fit_predict(adata.obsm[key]))
+
         elif method == "KMeans":
             kmeans = KMeans(n_clusters = n_clusters,random_state = 10)
-            adata.obs[f'RASP_{method}_clusters'] = pd.Categorical(kmeans.fit_predict(adata.obsm['X_pca_smoothed']))
+            adata.obs[f'RASP_{method}_clusters'] = pd.Categorical(kmeans.fit_predict(adata.obsm[key]))
 
         num_clusters = len(set(adata.obs[f'RASP_{method}_clusters']))
         palette = glasbey.create_palette(palette_size=num_clusters)
