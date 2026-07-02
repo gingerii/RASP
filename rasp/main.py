@@ -25,14 +25,25 @@ import glasbey
 class RASP:
     @staticmethod
     def reduce(adata, n_pcs=20, n_neighbors=6, beta=2, platform='visium',
-               random_state=2024, key_added='X_pca_smoothed', copy=False):
+               random_state=2024, covariates=None, smooth_covariates=True,
+               scale_covariates=False, n_pcs_cov=None,
+               key_added='X_pca_smoothed', cov_key='X_pca_cov', copy=False):
         """
         Run Randomized Spatial PCA (RASP) dimensionality reduction.
 
-        This is the core RASP algorithm. It runs in two steps:
-          1. Randomized PCA on the (dense) expression matrix ``adata.X``.
-          2. Spatial smoothing of the PC scores with an inverse-distance kNN
-             weights matrix built from ``adata.obsm['spatial']``.
+        This is the core RASP algorithm.
+
+        Stage 1 (always):
+          1. Randomized PCA on the (dense) expression matrix ``adata.X``
+             (centered, not scaled).
+          2. Spatial smoothing of those PC scores with an inverse-distance kNN
+             weights matrix ``W`` built from ``adata.obsm['spatial']``.
+
+        Stage 2 (only if ``covariates`` is given): the non-transcriptomic
+        covariates are (optionally) spatially smoothed with the same ``W``,
+        concatenated to the smoothed stage-1 scores, and a *second* randomized
+        PCA is run on the merged matrix to give the final covariate-integrated
+        embedding. No further smoothing is applied after the second PCA.
 
         The input is expected to be already preprocessed/normalized (e.g. the
         DLPFC tutorial uses an SCTransform-corrected matrix).
@@ -55,10 +66,30 @@ class RASP:
             Spatial platform, controls self-weighting in the weights matrix
             (default 'visium').
         random_state : int, optional
-            Seed for the randomized PCA solver (default 2024).
+            Seed for the randomized PCA solver(s) (default 2024).
+        covariates : array-like, str, or list of str, optional
+            Non-transcriptomic covariates to integrate (stage 2). May be an
+            ``(n_obs, d)`` array / DataFrame, a single ``adata.obs`` column
+            name or ``adata.obsm`` key, or a list of ``adata.obs`` column
+            names. If None (default), only stage 1 is run.
+        smooth_covariates : bool or sequence of bool, optional
+            Whether to spatially smooth the covariates with ``W`` before the
+            second PCA (default True). Pass a length-``d`` sequence for
+            per-covariate control.
+        scale_covariates : bool, optional
+            If True, z-score each covariate before concatenation (default
+            False; the published method does not require scaling, but it can
+            help when covariate magnitudes differ greatly from the PC scores).
+        n_pcs_cov : int, optional
+            Number of components for the stage-2 PCA (default: same as
+            ``n_pcs``). Clipped to the merged matrix dimensions.
         key_added : str, optional
-            ``adata.obsm`` key for the smoothed embedding
-            (default 'X_pca_smoothed').
+            ``adata.obsm`` key for the smoothed stage-1 scores
+            (default 'X_pca_smoothed'). This is the final embedding when no
+            covariates are supplied.
+        cov_key : str, optional
+            ``adata.obsm`` key for the stage-2 covariate-integrated embedding
+            (default 'X_pca_cov'); only written when ``covariates`` is given.
         copy : bool, optional
             If True, operate on and return a copy; otherwise modify ``adata``
             in place (default False).
@@ -67,15 +98,20 @@ class RASP:
         -------
         adata : AnnData
             Updated with:
-              - ``adata.obsm[key_added]`` : smoothed PC scores (n_obs x n_pcs)
-              - ``adata.obsm['X_pca']``   : unsmoothed PC scores (n_obs x n_pcs)
-              - ``adata.varm['RASP_PCs']``: PCA loadings (n_vars x n_pcs)
-              - ``adata.uns['RASP']``     : run parameters + explained variance
+              - ``adata.obsm[key_added]`` : smoothed stage-1 scores (n_obs x n_pcs)
+              - ``adata.obsm['X_pca']``   : unsmoothed stage-1 scores
+              - ``adata.varm['RASP_PCs']``: stage-1 loadings (n_vars x n_pcs)
+              - ``adata.obsm[cov_key]``   : stage-2 embedding (only with covariates)
+              - ``adata.uns['RASP']``     : run parameters, explained variance,
+                and ``embedding_key`` naming the final embedding to use downstream.
 
         Notes
         -----
-        To reconstruct a de-noised gene afterwards, feed the stored loadings
-        (transposed to n_pcs x n_vars) to :meth:`reconstruct_gene`::
+        Downstream steps (neighbors/clustering) should use the embedding named
+        by ``adata.uns['RASP']['embedding_key']`` — ``key_added`` for stage-1
+        only, or ``cov_key`` when covariates were integrated.
+
+        Gene reconstruction operates on the stage-1 result::
 
             RASP.reduce(adata, n_pcs=20)
             RASP.reconstruct_gene(adata, adata.obsm['X_pca_smoothed'],
@@ -89,14 +125,14 @@ class RASP:
                 "coordinates in adata.obsm['spatial']."
             )
 
-        # Stage 1: randomized PCA on the (dense) expression matrix.
+        # --- Stage 1: randomized PCA on the (dense) expression matrix. -------
         data = adata.X.toarray() if issparse(adata.X) else np.asarray(adata.X)
         n_pcs = int(min(n_pcs, min(data.shape)))
         pca = PCA(n_components=n_pcs, svd_solver='randomized',
                   random_state=random_state)
         pca_scores = pca.fit_transform(data)
 
-        # Stage 2: inverse-distance spatial smoothing of the PC scores.
+        # Inverse-distance spatial smoothing of the stage-1 PC scores.
         weights = RASP.build_weights_matrix(
             adata, n_neighbors=n_neighbors, beta=beta, platform=platform)
         smoothed = weights @ csr_matrix(pca_scores)
@@ -105,7 +141,8 @@ class RASP:
         adata.obsm[key_added] = smoothed
         adata.obsm['X_pca'] = pca_scores
         adata.varm['RASP_PCs'] = pca.components_.T
-        adata.uns['RASP'] = {
+
+        uns = {
             'params': {
                 'n_pcs': n_pcs,
                 'n_neighbors': n_neighbors,
@@ -115,9 +152,111 @@ class RASP:
                 'key_added': key_added,
             },
             'variance_ratio': pca.explained_variance_ratio_,
+            'n_stages': 1,
+            'embedding_key': key_added,
         }
 
+        # --- Stage 2: covariate integration via a second randomized PCA. -----
+        if covariates is not None:
+            cov, cov_names = RASP._resolve_covariates(adata, covariates)
+
+            if scale_covariates:
+                std = cov.std(axis=0)
+                std[std == 0] = 1.0
+                cov = (cov - cov.mean(axis=0)) / std
+
+            # Optional per-covariate spatial smoothing with the same W.
+            smooth_mask = smooth_covariates
+            if np.isscalar(smooth_mask) or isinstance(smooth_mask, bool):
+                smooth_mask = np.full(cov.shape[1], bool(smooth_mask))
+            else:
+                smooth_mask = np.asarray(smooth_mask, dtype=bool)
+                if smooth_mask.shape[0] != cov.shape[1]:
+                    raise ValueError(
+                        "smooth_covariates sequence length "
+                        f"({smooth_mask.shape[0]}) must match the number of "
+                        f"covariates ({cov.shape[1]})."
+                    )
+            cov_s = cov.copy()
+            if smooth_mask.any():
+                cov_s[:, smooth_mask] = np.asarray(
+                    weights @ cov[:, smooth_mask])
+
+            # Concatenate smoothed stage-1 scores with (smoothed) covariates
+            # and run the stage-2 randomized PCA.
+            merged = np.hstack([smoothed, cov_s])
+            p2 = int(min(n_pcs_cov or n_pcs, min(merged.shape)))
+            pca2 = PCA(n_components=p2, svd_solver='randomized',
+                       random_state=random_state)
+            cov_embedding = pca2.fit_transform(merged)
+
+            adata.obsm[cov_key] = cov_embedding
+            uns['n_stages'] = 2
+            uns['embedding_key'] = cov_key
+            uns['params'].update({
+                'covariate_names': cov_names,
+                'smooth_covariates': smooth_mask.tolist(),
+                'scale_covariates': bool(scale_covariates),
+                'n_pcs_cov': p2,
+                'cov_key': cov_key,
+            })
+            uns['stage2_variance_ratio'] = pca2.explained_variance_ratio_
+
+        adata.uns['RASP'] = uns
         return adata
+
+    @staticmethod
+    def _resolve_covariates(adata, covariates):
+        """
+        Coerce the ``covariates`` argument to a float ``(n_obs, d)`` array.
+
+        Accepts an array / DataFrame, a single ``adata.obs`` column name or
+        ``adata.obsm`` key, or a list of ``adata.obs`` column names. Returns
+        ``(array, names)``.
+        """
+        # String -> obs column or obsm key.
+        if isinstance(covariates, str):
+            if covariates in adata.obs.columns:
+                arr = adata.obs[[covariates]].to_numpy()
+                names = [covariates]
+            elif covariates in adata.obsm:
+                arr = np.asarray(adata.obsm[covariates])
+                if arr.ndim == 1:
+                    arr = arr[:, None]
+                names = [f"{covariates}_{i}" for i in range(arr.shape[1])]
+            else:
+                raise KeyError(
+                    f"covariate '{covariates}' not found in adata.obs columns "
+                    "or adata.obsm keys."
+                )
+        # List/tuple of obs column names.
+        elif isinstance(covariates, (list, tuple)) and covariates and \
+                all(isinstance(c, str) for c in covariates):
+            missing = [c for c in covariates if c not in adata.obs.columns]
+            if missing:
+                raise KeyError(f"covariate columns not in adata.obs: {missing}")
+            arr = adata.obs[list(covariates)].to_numpy()
+            names = list(covariates)
+        # pandas DataFrame.
+        elif isinstance(covariates, pd.DataFrame):
+            arr = covariates.to_numpy()
+            names = list(covariates.columns.astype(str))
+        # Plain array-like.
+        else:
+            arr = np.asarray(covariates)
+            if arr.ndim == 1:
+                arr = arr[:, None]
+            names = [f"covariate_{i}" for i in range(arr.shape[1])]
+
+        arr = np.asarray(arr, dtype=float)
+        if arr.shape[0] != adata.n_obs:
+            raise ValueError(
+                f"covariates have {arr.shape[0]} rows but adata has "
+                f"{adata.n_obs} observations."
+            )
+        if not np.isfinite(arr).all():
+            raise ValueError("covariates contain non-finite values (NaN/inf).")
+        return arr, names
 
     @staticmethod
     def build_weights_matrix(adata, n_neighbors=6, beta=2, platform='visium'):

@@ -49,7 +49,34 @@ To enable the optional R-backed `mclust` clustering:
 pip install ".[mclust]"   # then, in R: install.packages("mclust")
 ```
 ## Usage
-See tutorials folder for example usage
+See the tutorials folder for an end-to-end example. In brief:
+
+```python
+from rasp import RASP
+import scanpy as sc
+
+# adata: normalized expression in adata.X, coordinates in adata.obsm['spatial']
+RASP.reduce(adata, n_pcs=20, n_neighbors=6, beta=2, platform='visium')
+sc.pp.neighbors(adata, use_rep=adata.uns['RASP']['embedding_key'])
+RASP.clustering(adata, n_clusters=7, method='leiden')
+```
+
+### Covariate integration (two-stage RASP)
+RASP can integrate non-transcriptomic covariates (e.g. morphology or histology
+features). When `covariates` are supplied, the smoothed stage-1 PC scores are
+concatenated with the (optionally spatially smoothed) covariates and a second
+randomized PCA produces the final embedding:
+
+```python
+# covariates: an (n_obs, d) array, adata.obs column name(s), or an adata.obsm key
+RASP.reduce(adata, n_pcs=20, covariates=['morph_area', 'morph_ecc'])
+# the integrated embedding is written to adata.obsm['X_pca_cov']; the key to use
+# downstream is always adata.uns['RASP']['embedding_key']
+sc.pp.neighbors(adata, use_rep=adata.uns['RASP']['embedding_key'])
+```
+
+Use `smooth_covariates` (bool or per-covariate list) and `scale_covariates` to
+control covariate smoothing and z-scoring.
 
 ## Citation
 If you use RASP in your research, please cite the following preprint: https://www.biorxiv.org/content/10.1101/2024.12.20.629785v1
