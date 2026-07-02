@@ -1,25 +1,124 @@
 # main.py
 
+import time
+
 import numpy as np
 import pandas as pd
 import scanpy as sc
-from scipy.sparse import csr_matrix, coo_matrix
+from scipy.sparse import csr_matrix, coo_matrix, issparse
+from scipy.spatial import KDTree
+from scipy.spatial.distance import cdist
+from sklearn.decomposition import PCA
 from sklearn.neighbors import NearestNeighbors
 from sklearn.cluster import KMeans
 from sklearn.metrics import adjusted_rand_score
-from scipy.spatial.distance import cdist
-import igraph as ig
 from sklearn.preprocessing import scale
+import igraph as ig
 from tqdm import tqdm
 from multiprocessing import Pool
 import glasbey
-import rpy2.robjects as robjects
 
-# Ensure rpy2 is activated
-import rpy2.robjects.numpy2ri
-rpy2.robjects.numpy2ri.activate()
+# NOTE: rpy2 / R ("mclust") are imported lazily inside clustering(method="mclust")
+# so the package imports cleanly without R installed. Enable that path with
+# `pip install "rasp[mclust]"` (pins rpy2==3.5.16) plus R's `mclust` package.
 
 class RASP:
+    @staticmethod
+    def reduce(adata, n_pcs=20, n_neighbors=6, beta=2, platform='visium',
+               random_state=2024, key_added='X_pca_smoothed', copy=False):
+        """
+        Run Randomized Spatial PCA (RASP) dimensionality reduction.
+
+        This is the core RASP algorithm. It runs in two steps:
+          1. Randomized PCA on the (dense) expression matrix ``adata.X``.
+          2. Spatial smoothing of the PC scores with an inverse-distance kNN
+             weights matrix built from ``adata.obsm['spatial']``.
+
+        The input is expected to be already preprocessed/normalized (e.g. the
+        DLPFC tutorial uses an SCTransform-corrected matrix).
+
+        Parameters
+        ----------
+        adata : AnnData
+            Expression in ``adata.X`` and spatial coordinates in
+            ``adata.obsm['spatial']``.
+        n_pcs : int, optional
+            Number of principal components for the stage-1 randomized PCA
+            (default 20). Clipped to ``min(n_obs, n_vars)``.
+        n_neighbors : int, optional
+            Number of spatial neighbors used to build the smoothing weights
+            (default 6; passed to :meth:`build_weights_matrix`).
+        beta : float, optional
+            Inverse-distance weighting exponent (default 2; passed to
+            :meth:`build_weights_matrix`).
+        platform : str, optional
+            Spatial platform, controls self-weighting in the weights matrix
+            (default 'visium').
+        random_state : int, optional
+            Seed for the randomized PCA solver (default 2024).
+        key_added : str, optional
+            ``adata.obsm`` key for the smoothed embedding
+            (default 'X_pca_smoothed').
+        copy : bool, optional
+            If True, operate on and return a copy; otherwise modify ``adata``
+            in place (default False).
+
+        Returns
+        -------
+        adata : AnnData
+            Updated with:
+              - ``adata.obsm[key_added]`` : smoothed PC scores (n_obs x n_pcs)
+              - ``adata.obsm['X_pca']``   : unsmoothed PC scores (n_obs x n_pcs)
+              - ``adata.varm['RASP_PCs']``: PCA loadings (n_vars x n_pcs)
+              - ``adata.uns['RASP']``     : run parameters + explained variance
+
+        Notes
+        -----
+        To reconstruct a de-noised gene afterwards, feed the stored loadings
+        (transposed to n_pcs x n_vars) to :meth:`reconstruct_gene`::
+
+            RASP.reduce(adata, n_pcs=20)
+            RASP.reconstruct_gene(adata, adata.obsm['X_pca_smoothed'],
+                                  adata.varm['RASP_PCs'].T, gene_name='TMSB10')
+        """
+        adata = adata.copy() if copy else adata
+
+        if 'spatial' not in adata.obsm:
+            raise KeyError(
+                "adata.obsm['spatial'] not found; RASP requires 2D spatial "
+                "coordinates in adata.obsm['spatial']."
+            )
+
+        # Stage 1: randomized PCA on the (dense) expression matrix.
+        data = adata.X.toarray() if issparse(adata.X) else np.asarray(adata.X)
+        n_pcs = int(min(n_pcs, min(data.shape)))
+        pca = PCA(n_components=n_pcs, svd_solver='randomized',
+                  random_state=random_state)
+        pca_scores = pca.fit_transform(data)
+
+        # Stage 2: inverse-distance spatial smoothing of the PC scores.
+        weights = RASP.build_weights_matrix(
+            adata, n_neighbors=n_neighbors, beta=beta, platform=platform)
+        smoothed = weights @ csr_matrix(pca_scores)
+        smoothed = smoothed.toarray() if issparse(smoothed) else np.asarray(smoothed)
+
+        adata.obsm[key_added] = smoothed
+        adata.obsm['X_pca'] = pca_scores
+        adata.varm['RASP_PCs'] = pca.components_.T
+        adata.uns['RASP'] = {
+            'params': {
+                'n_pcs': n_pcs,
+                'n_neighbors': n_neighbors,
+                'beta': beta,
+                'platform': platform,
+                'random_state': random_state,
+                'key_added': key_added,
+            },
+            'variance_ratio': pca.explained_variance_ratio_,
+        }
+
+        return adata
+
     @staticmethod
     def build_weights_matrix(adata, n_neighbors=6, beta=2, platform='visium'):
         """
@@ -65,7 +164,7 @@ class RASP:
         inverse_sq_matrix = csr_matrix((inverse_sq_data, sparse_distance_matrix.indices, sparse_distance_matrix.indptr),
                                         shape=sparse_distance_matrix.shape)
 
-        row_sums = inverse_sq_matrix.sum(axis=1).A1
+        row_sums = np.asarray(inverse_sq_matrix.sum(axis=1)).ravel()
         row_sums[row_sums == 0] = 1
         weights = inverse_sq_matrix.multiply(1 / row_sums[:, np.newaxis])
 
@@ -89,9 +188,18 @@ class RASP:
 
         if method == 'mclust':
             np.random.seed(2020)
-            import rpy2.robjects as robjects
+            try:
+                import rpy2.robjects as robjects
+                import rpy2.robjects.numpy2ri
+            except ImportError as e:
+                raise ImportError(
+                    "method='mclust' requires rpy2 and an R installation with the "
+                    "'mclust' package. Install with `pip install \"rasp[mclust]\"` "
+                    "(pins rpy2==3.5.16) and, in R, run install.packages('mclust'). "
+                    "Otherwise choose method='louvain', 'leiden', 'KMeans', or "
+                    "'walktrap', which have no R dependency."
+                ) from e
             robjects.r.library("mclust")
-            import rpy2.robjects.numpy2ri
             rpy2.robjects.numpy2ri.activate()
             r_random_seed = robjects.r['set.seed']
             r_random_seed(2020)
@@ -111,7 +219,7 @@ class RASP:
         elif method =="walktrap":
                 neighbors_graph = adata.obsp['connectivities']
                 sources, targets = neighbors_graph.nonzero()
-                weights = neighbors_graph[sources, targets].A1
+                weights = np.asarray(neighbors_graph[sources, targets]).ravel()
                 g = ig.Graph(directed=False)
                 g.add_vertices(adata.n_obs)
                 g.add_edges(zip(sources, targets))
