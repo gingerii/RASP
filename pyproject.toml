@@ -47,7 +47,7 @@ mclust = ["rpy2==3.5.16"]
 Homepage = "https://github.com/gingerii/RASP"
 Repository = "https://github.com/gingerii/RASP"
 "Bug Tracker" = "https://github.com/gingerii/RASP/issues"
-Preprint = "https://www.biorxiv.org/content/10.1101/2024.12.20.629785v1"
+Publication = "https://doi.org/10.1371/journal.pcbi.1013759"
 
 [tool.setuptools.packages.find]
 include = ["rasp*"]

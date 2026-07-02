@@ -79,4 +79,8 @@ Use `smooth_covariates` (bool or per-covariate list) and `scale_covariates` to
 control covariate smoothing and z-scoring.
 
 ## Citation
-If you use RASP in your research, please cite the following preprint: https://www.biorxiv.org/content/10.1101/2024.12.20.629785v1
+If you use RASP in your research, please cite our publication in *PLOS Computational Biology*:
+
+Gingerich et al. Randomized Spatial PCA (RASP): a computationally efficient method for dimensionality reduction of high-resolution spatial transcriptomics data. *PLOS Computational Biology* (2024). https://doi.org/10.1371/journal.pcbi.1013759
+
+Article: https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1013759
