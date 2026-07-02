@@ -1,6 +1,6 @@
 # Randomized Spatial PCA (RASP)
 
-![RASP overview](figures/figure_1.png)
+![RASP overview](https://raw.githubusercontent.com/gingerii/RASP/main/figures/figure_1.png)
 
 
 ## Description
@@ -34,19 +34,22 @@ manuscript results were produced with the following pinned versions (also in
 ```
 The `mclust` clustering option additionally requires `rpy2==3.5.16` and an R
 installation with the `mclust` package; all other clustering methods
-(`louvain`, `leiden`, `KMeans`, `walktrap`) are pure Python.
+(`gmm`, `louvain`, `leiden`, `KMeans`, `walktrap`) are pure Python. `gmm` is an
+R-free equivalent of `mclust` (a tied-covariance Gaussian mixture == mclust
+`EEE`).
 
 ## Installation
-Navigate to where you would like to install the package, clone the repo, and
-install with pip:
+Install from PyPI (the import name is `rasp`):
 ```bash
-git clone https://github.com/gingerii/RASP.git
-cd RASP
-pip install .
+pip install randomized-spatial-pca
+```
+Or install the latest development version directly from GitHub:
+```bash
+pip install git+https://github.com/gingerii/RASP.git
 ```
 To enable the optional R-backed `mclust` clustering:
 ```bash
-pip install ".[mclust]"   # then, in R: install.packages("mclust")
+pip install "randomized-spatial-pca[mclust]"   # then, in R: install.packages("mclust")
 ```
 ## Usage
 See the tutorials folder for an end-to-end example. In brief:

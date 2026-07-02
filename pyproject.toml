@@ -3,7 +3,10 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rasp"
+# Distribution name on PyPI (the 'rasp' / 'RASP' name is squatted by an
+# unrelated 2020 placeholder). The import package is still 'rasp':
+#   pip install randomized-spatial-pca   ->   from rasp import RASP
+name = "randomized-spatial-pca"
 version = "0.1.1"
 description = "Randomized Spatial PCA (RASP): a computationally efficient method for dimensionality reduction of high-resolution spatial transcriptomics data"
 readme = "README.md"
